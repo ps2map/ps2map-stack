@@ -1,0 +1,88 @@
+services:
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${PS2MAP_DB_NAME}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db_init:
+    build:
+      context: https://github.com/ps2map/ps2map-schema.git
+      dockerfile: Dockerfile
+    environment:
+      PS2MAP_SERVICE_ID: ${PS2MAP_SERVICE_ID}
+      PS2MAP_DB_HOST: db
+      PS2MAP_DB_PORT: 5432
+      PS2MAP_DB_NAME: ${PS2MAP_DB_NAME}
+      PS2MAP_DB_USER: postgres
+      PS2MAP_DB_PASS: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python3", "-m", "bootstrap"]
+
+  api:
+    build:
+      context: https://github.com/ps2map/ps2map-api.git
+      dockerfile: Dockerfile
+    environment:
+      PS2MAP_SERVICE_ID: ${PS2MAP_SERVICE_ID}
+      PS2MAP_DB_HOST: db
+      PS2MAP_DB_PORT: 5432
+      PS2MAP_DB_NAME: ${PS2MAP_DB_NAME}
+      PS2MAP_DB_USER: postgres
+      PS2MAP_DB_PASS: postgres
+    ports:
+      - "5001:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/server"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    command: ["python3", "-m", "server"]
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      API_URL: http://localhost:5001/
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./frontend/nginx.conf:/etc/nginx/nginx.conf
+
+  territory:
+    build:
+      context: https://github.com/ps2map/ps2map-territory.git
+      dockerfile: Dockerfile
+    environment:
+      PS2MAP_SERVICE_ID: ${PS2MAP_SERVICE_ID}
+      PS2MAP_DB_HOST: db
+      PS2MAP_DB_PORT: 5432
+      PS2MAP_DB_NAME: ${PS2MAP_DB_NAME}
+      PS2MAP_DB_USER: postgres
+      PS2MAP_DB_PASS: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command: ["python3", "-m", "app"]
+
+volumes:
+  db-data:
